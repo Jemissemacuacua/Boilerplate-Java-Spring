@@ -1,11 +1,13 @@
 package com.app.builderplante.modules.user;
 
+import com.app.builderplante.core.audit.AuditService;
 import com.app.builderplante.core.exception.AppException;
 import com.app.builderplante.core.pagination.PageRequestBuilder;
 import com.app.builderplante.core.pagination.PageResponse;
 import com.app.builderplante.shared.BaseService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 
 @Service
@@ -14,6 +16,8 @@ public class UserService extends BaseService<User, Long> {
 
     private final UserRepository userRepository;
     private final UserMapper userMapper;
+    private final PasswordEncoder passwordEncoder;
+    private final AuditService auditService;
 
     @Override
     protected JpaRepository<User, Long> getRepository() {
@@ -25,7 +29,10 @@ public class UserService extends BaseService<User, Long> {
             throw AppException.conflict("Email já está em uso");
         }
         User user = userMapper.toEntity(dto);
-        return userMapper.toResponse(userRepository.save(user));
+        user.setPassword(passwordEncoder.encode(dto.getPassword()));
+        User saved = userRepository.save(user);
+        auditService.log("CREATE", "User", String.valueOf(saved.getId()), null, userMapper.toResponse(saved));
+        return userMapper.toResponse(saved);
     }
 
     public PageResponse<UserDTO.Response> findAllActive(Integer page, Integer size) {
@@ -45,6 +52,8 @@ public class UserService extends BaseService<User, Long> {
         User user = userRepository.findById(id)
                 .orElseThrow(() -> AppException.notFound("Utilizador não encontrado"));
 
+        UserDTO.Response previousState = userMapper.toResponse(user);
+
         if (dto.getName() != null) user.setName(dto.getName());
         if (dto.getEmail() != null) {
             if (userRepository.existsByEmail(dto.getEmail())) {
@@ -53,13 +62,17 @@ public class UserService extends BaseService<User, Long> {
             user.setEmail(dto.getEmail());
         }
 
-        return userMapper.toResponse(userRepository.save(user));
+        User saved = userRepository.save(user);
+        auditService.log("UPDATE", "User", String.valueOf(id), previousState, userMapper.toResponse(saved));
+        return userMapper.toResponse(saved);
     }
 
     public void deactivate(Long id) {
         User user = userRepository.findById(id)
                 .orElseThrow(() -> AppException.notFound("Utilizador não encontrado"));
+        UserDTO.Response previousState = userMapper.toResponse(user);
         user.setActive(false);
         userRepository.save(user);
+        auditService.log("DEACTIVATE", "User", String.valueOf(id), previousState, null);
     }
 }
